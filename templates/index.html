@@ -39,13 +39,17 @@
     .success {
       color: #006400;
     }
+    .blocked {
+      color: #8a2be2;
+    }
   </style>
 </head>
 <body>
   <h1>Automatic UDP Sender</h1>
 
   <p>
-    Specifica una subnet in notazione base e la CIDR. Ad ogni invio verrà scelta:
+    Specifica una subnet in notazione base e la CIDR. Se inserisci una CIDR &lt; 18,
+    verrà automaticamente usato 18.
   </p>
   <ul>
     <li>una frase casuale da <code>preghierine.txt</code></li>
@@ -55,13 +59,13 @@
 
   <form id="sendForm">
     <label>
-      Subnet (es. 192.168.1.0)
-      <input type="text" id="subnet" value="127.0.0.1" required>
+      Subnet (es. 1.2.3.0)
+      <input type="text" id="subnet" value="1.2.3.0" required>
     </label>
 
     <label>
-      CIDR (es. 24)
-      <input type="number" id="cidr" min="0" max="32" value="32" required>
+      CIDR (es. 24, minimo effettivo 18)
+      <input type="number" id="cidr" min="0" max="32" value="24" required>
     </label>
 
     <label>
@@ -115,14 +119,23 @@
         if (!res.ok || data.error) {
           resultDiv.className = "result error";
           resultDiv.textContent = "Errore: " + (data.error || `HTTP ${res.status}`);
+        } else if (data.status === "blocked") {
+          resultDiv.className = "result blocked";
+          resultDiv.textContent =
+            "Richiesta bloccata.\n\n" +
+            "Motivo: " + data.message + "\n" +
+            "IP (candidato) di destinazione: " + data.targetIp + "\n" +
+            "Subnet (CIDR): " + data.subnetCidr;
         } else {
           resultDiv.className = "result success";
+          const cidrEff = data.cidrEffective ?? "(non disponibile)";
           resultDiv.textContent =
             "Frase inviata con successo.\n\n" +
             "Frase: " + data.messageSent + "\n" +
             "IP di destinazione: " + data.targetIp + "\n" +
             "Porta: " + data.targetPort + "\n" +
-            "Subnet (CIDR): " + data.subnetCidr;
+            "Subnet (CIDR): " + data.subnetCidr + "\n" +
+            "CIDR effettiva usata: " + cidrEff;
         }
       } catch (err) {
         resultDiv.style.display = "block";
