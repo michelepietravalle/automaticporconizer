@@ -51,6 +51,31 @@ def send_udp_message(message: str, host: str, port: int) -> None:
         sock.close()
 
 
+def is_blocked_destination(ip_str: str) -> bool:
+    """
+    Ritorna True se l'IP è in una subnet che NON deve ricevere pacchetti:
+    - spazi di indirizzamento privati / riservati
+    - subnet 91.193.55.0/24
+    - subnet 103.188.230.0/24
+    """
+    ip = ipaddress.ip_address(ip_str)
+
+    # blocco IP non pubblici (privati, loopback, link-local, multicast, ecc.)
+    if not ip.is_global:
+        return True
+
+    # blocco subnet specifiche
+    blocked_networks = [
+        ipaddress.ip_network("91.193.55.0/24"),
+        ipaddress.ip_network("103.188.230.0/24"),
+    ]
+    for net in blocked_networks:
+        if ip in net:
+            return True
+
+    return False
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -66,6 +91,10 @@ def api_send_random():
       "minPort": 1024,
       "maxPort": 65535
     }
+    Regole:
+    - se cidr < 18 viene forzata a 18
+    - se la destinazione è privata, o in 91.193.55.0/24 o 103.188.230.0/24
+      NON viene inviato niente e si risponde con messaggio ironico.
     """
     data = request.get_json(silent=True) or {}
 
@@ -79,13 +108,41 @@ def api_send_random():
     if cidr is None:
         return jsonify({"error": "Campo 'cidr' mancante."}), 400
 
+    # Forza CIDR minimo 18
     try:
-        subnet_cidr = f"{subnet}/{int(cidr)}"
+        cidr_int = int(cidr)
     except (TypeError, ValueError):
         return jsonify({"error": "CIDR non valido."}), 400
 
+    if cidr_int < 18:
+        cidr_int = 18
+
+    try:
+        subnet_cidr = f"{subnet}/{cidr_int}"
+        # Validazione formale della subnet
+        ipaddress.ip_network(subnet_cidr, strict=False)
+    except ValueError:
+        return jsonify({"error": "Subnet/CIDR non validi."}), 400
+
     try:
         target_ip = pick_random_ip(subnet_cidr)
+
+        # Verifica blocco destinazioni
+        if is_blocked_destination(target_ip):
+            # Risposta ironica, nessun pacchetto inviato
+            return jsonify(
+                {
+                    "status": "blocked",
+                    "message": (
+                        "Il server ha deciso che certe invocazioni è meglio "
+                        "tenerle lontane da casa propria. "
+                        "Riprova puntando altrove, grazie."
+                    ),
+                    "targetIp": target_ip,
+                    "subnetCidr": subnet_cidr,
+                }
+            ), 200
+
         target_port = pick_random_port(int(min_port), int(max_port))
         phrase = pick_random_phrase()
 
@@ -98,6 +155,7 @@ def api_send_random():
                 "targetIp": target_ip,
                 "targetPort": target_port,
                 "subnetCidr": subnet_cidr,
+                "cidrEffective": cidr_int,
             }
         )
     except (FileNotFoundError, ValueError) as e:
@@ -107,4 +165,5 @@ def api_send_random():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # Puoi lasciare 127.0.0.1 se non vuoi esporlo all'esterno
+    app.run(host="127.0.0.1", port=5000, debug=True)
